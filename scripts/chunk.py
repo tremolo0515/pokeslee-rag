@@ -172,12 +172,14 @@ def main() -> None:
         chunks = build_chunks_for_page(body)
         for idx, chunk_text in enumerate(chunks, start=1):
             chunk_id = f"{slug}_{idx:03d}"
+            # タイトルを先頭に付与してページの文脈を保持
+            text_with_title = f"【{title}】\n{chunk_text}"
             all_chunks.append({
                 "id": chunk_id,
                 "url": url,
                 "title": title,
                 "content_hash": content_hash,
-                "text": chunk_text,
+                "text": text_with_title,
             })
 
         total_files += 1
