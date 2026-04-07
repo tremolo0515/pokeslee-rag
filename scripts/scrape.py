@@ -32,7 +32,9 @@ CONTENT_SELECTORS = [
 EXCLUDED_PATHS = ["/poke_sleep/edit/", "/poke_sleep/diff/", "/poke_sleep/attach/",
                   "/poke_sleep/search", "/poke_sleep/recent", "/poke_sleep/help",
                   "/poke_sleep/trackback/", "/poke_sleep/backup/",
-                  "/poke_sleep/cmd/"]
+                  "/poke_sleep/cmd/",
+                  "/poke_sleep/コメント/",   # ユーザー投稿の掲示板（ノイズ）
+                  "/poke_sleep/%E3%82%B3%E3%83%A1%E3%83%B3%E3%83%88/"]  # URLエンコード版
 
 MAX_DEPTH = 3
 REQUEST_INTERVAL = 1.5   # 秒

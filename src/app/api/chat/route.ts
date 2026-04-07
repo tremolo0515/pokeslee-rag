@@ -5,20 +5,24 @@ import OpenAI from "openai";
 // ─── 定数 ─────────────────────────────────────────────────────────────────────
 const EMBED_MODEL = "text-embedding-3-small";
 const CHAT_MODEL = "gpt-4.1-nano";
-const TOP_K = 5;
+const TOP_K = 8;
 const SIMILARITY_THRESHOLD = 0.50;
 const MAX_INPUT_LENGTH = 500;
 const MAX_HISTORY_MESSAGES = 10;
 
-const SYSTEM_PROMPT = `あなたはポケスリ（Pokémon Sleep）の初心者向けアシスタントです。
-以下のwiki情報をもとに、やさしく丁寧に答えてください。
+const SYSTEM_PROMPT = `あなたはポケスリ（Pokémon Sleep）のアシスタントです。
+以下のwiki情報をもとに正確に答えてください。
 
 厳守ルール：
 - 必ず【wiki情報】に書かれている内容だけを使って回答する
 - 【wiki情報】に書かれていないことは、自分の知識で補わず「wikiには記載がありませんでした」と答える
 - ポケモンの対戦・レベル・捕獲など、ポケスリと関係ない情報は絶対に回答しない
-- 初心者にわかりやすい言葉を使う
-- 回答は簡潔に、200字以内を目安にする
+
+回答スタイル：
+- ポケモンの性能・スペックを聞かれたら、きのみ・食材・メインスキル・適正フィールド・特徴を具体的に列挙する
+- 数値や固有名詞（食材名・スキル名・フィールド名）はwiki情報から正確に転記する
+- 簡単な質問は2〜3文、詳しい質問は箇条書きで答える
+- 専門用語はそのまま使ってよい（初心者でも調べられる）
 
 【wiki情報】
 {context}`;
@@ -204,9 +208,10 @@ async function embedQuery(text: string): Promise<number[]> {
 }
 
 // ─── 類似チャンク検索 ─────────────────────────────────────────────────────────
-async function searchChunks(queryVector: number[]): Promise<WikiChunk[]> {
+async function searchChunks(queryVector: number[], queryText: string): Promise<WikiChunk[]> {
   const { data, error } = await supabase.rpc("match_wiki_chunks", {
     query_embedding: queryVector,
+    query_text: queryText,
     match_count: TOP_K,
     similarity_threshold: SIMILARITY_THRESHOLD,
   });
@@ -267,7 +272,7 @@ export async function POST(req: NextRequest) {
     const queryVector = await embedQuery(normalizedMessage);
 
     // 2. 類似チャンク検索
-    const chunks = await searchChunks(queryVector);
+    const chunks = await searchChunks(queryVector, normalizedMessage);
 
     // 0件の場合
     if (chunks.length === 0) {
