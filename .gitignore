@@ -1,0 +1,21 @@
+# 環境変数
+.env.local
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# データファイル（大きいので除外）
+data/pages/
+data/chunks.jsonl
+
+# Node.js
+node_modules/
+.next/
+
+# OS
+.DS_Store
