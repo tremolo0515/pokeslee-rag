@@ -8,10 +8,10 @@ import hashlib
 import logging
 import re
 import time
-import urllib.robotparser
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urljoin, urlparse, urlunparse
+from typing import Optional
+from urllib.parse import unquote, urljoin, urlparse, urlunparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -48,26 +48,52 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ─── robots.txt ─────────────────────────────────────────────────────────────
+# Python 3.9 の urllib.robotparser は /*? などのワイルドカードを誤判定するため
+# 独自パーサーを使用する
 
-def load_robots(base_url: str) -> urllib.robotparser.RobotFileParser:
-    rp = urllib.robotparser.RobotFileParser()
+def load_robots(base_url: str) -> list:
+    """robots.txt の Disallow パターンリストを返す"""
     robots_url = urljoin(base_url, "/robots.txt")
-    rp.set_url(robots_url)
+    disallow_patterns: list = []
     try:
-        rp.read()
-        log.info(f"robots.txt 取得: {robots_url}")
+        resp = requests.get(robots_url, timeout=HTTP_TIMEOUT)
+        resp.raise_for_status()
+        in_target_block = False
+        for line in resp.text.splitlines():
+            line = line.strip()
+            if line.lower().startswith("user-agent:"):
+                agent = line.split(":", 1)[1].strip()
+                in_target_block = agent == "*"
+            elif in_target_block and line.lower().startswith("disallow:"):
+                pattern = line.split(":", 1)[1].strip()
+                if pattern:
+                    disallow_patterns.append(pattern)
+        log.info(f"robots.txt 取得: {robots_url} ({len(disallow_patterns)}件のDisallow)")
     except Exception as e:
         log.warning(f"robots.txt 取得失敗（スキップして続行）: {e}")
-    return rp
+    return disallow_patterns
 
 
-def is_allowed(rp: urllib.robotparser.RobotFileParser, url: str) -> bool:
-    return rp.can_fetch("*", url)
+def _robots_pattern_to_regex(pattern: str) -> re.Pattern:
+    """robots.txt のパスパターンを正規表現に変換する"""
+    escaped = re.escape(pattern).replace(r"\*", ".*").replace(r"\$", "$")
+    if not escaped.endswith("$"):
+        escaped += ".*"
+    return re.compile(escaped)
+
+
+def is_allowed(disallow_patterns: list, url: str) -> bool:
+    path = urlparse(url).path
+    for pattern in disallow_patterns:
+        regex = _robots_pattern_to_regex(pattern)
+        if regex.match(path):
+            return False
+    return True
 
 
 # ─── HTTPリクエスト ───────────────────────────────────────────────────────────
 
-def fetch(session: requests.Session, url: str) -> requests.Response | None:
+def fetch(session: requests.Session, url: str) -> Optional[requests.Response]:
     """指数バックオフ付きリトライでHTTPリクエスト"""
     for attempt in range(MAX_RETRIES):
         try:
@@ -124,7 +150,7 @@ def extract_links(soup: BeautifulSoup, current_url: str) -> list[str]:
 
 # ─── コンテンツ抽出 ───────────────────────────────────────────────────────────
 
-def extract_content(soup: BeautifulSoup) -> str | None:
+def extract_content(soup: BeautifulSoup) -> Optional[str]:
     """メインコンテンツ領域のテキストを抽出"""
     for selector in CONTENT_SELECTORS:
         node = soup.select_one(selector)
@@ -157,12 +183,19 @@ def extract_title(soup: BeautifulSoup, url: str) -> str:
 
 def url_to_filename(url: str, used: set[str]) -> str:
     path = urlparse(url).path.rstrip("/")
+    # URLデコードして日本語に戻す
+    path = unquote(path)
     slug = path.split("/poke_sleep/", 1)[-1] if "/poke_sleep/" in path else path
     if not slug:
         slug = "index"
     # OS非対応文字を _ に置換
     safe = re.sub(r'[/:\\?#*"<>|]', "_", slug)
     safe = safe.strip("_") or "index"
+    # macOS のファイル名上限は255バイト。拡張子(.md=3bytes)分を引いた220文字で切る
+    if len(safe.encode("utf-8")) > 220:
+        short_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+        # 先頭100文字 + ハッシュ
+        safe = safe[:100].rstrip("_") + f"__{short_hash}"
 
     candidate = f"{safe}.md"
     if candidate not in used:
@@ -199,7 +232,7 @@ def scrape() -> None:
     session = requests.Session()
     session.headers.update({"User-Agent": "pokeslee-rag-bot/1.0 (educational fan tool)"})
 
-    rp = load_robots(BASE_URL)
+    disallow_patterns = load_robots(BASE_URL)
 
     visited: set[str] = set()
     used_filenames: set[str] = set()
@@ -214,7 +247,7 @@ def scrape() -> None:
             continue
         visited.add(url)
 
-        if not is_allowed(rp, url):
+        if not is_allowed(disallow_patterns, url):
             log.info(f"robots.txt によりスキップ: {url}")
             skipped += 1
             continue
